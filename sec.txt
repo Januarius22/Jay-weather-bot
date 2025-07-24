@@ -1,0 +1,161 @@
+import logging
+import requests
+import json
+from datetime import datetime, timedelta, time
+from telegram import Update, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+    CallbackQueryHandler,
+    JobQueue,
+)
+
+# Enable logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+# === CONFIG ===
+BOT_TOKEN = "7949067008:AAFgTnK0MjKngM00qcd08oaJCjjjOfXLbyU"
+ADMIN_ID = 5075178708
+WEATHER_API_KEY = "ef68327cb4c2420881c02338252307"
+users_file = "users.json"
+
+# === Utilities ===
+def get_weather(city):
+    url = f"https://api.weatherapi.com/v1/forecast.json?key={WEATHER_API_KEY}&q={city}&days=3&aqi=no&alerts=yes"
+    response = requests.get(url)
+    if response.status_code == 200:
+        data = response.json()
+        location = data['location']['name']
+        forecast = data['forecast']['forecastday']
+        result = f"📍 Weather forecast for {location} (Next 3 days):\n"
+        for day in forecast:
+            date = day['date']
+            condition = day['day']['condition']['text']
+            avg_temp = day['day']['avgtemp_c']
+            result += f"\n📅 {date}: {condition}, 🌡 {avg_temp}°C"
+        return result
+    return "❌ Couldn't fetch weather data. Please check the city name."
+
+def save_user(user_id):
+    try:
+        with open(users_file, 'r') as f:
+            users = json.load(f)
+    except FileNotFoundError:
+        users = []
+
+    if user_id not in users:
+        users.append(user_id)
+        with open(users_file, 'w') as f:
+            json.dump(users, f)
+
+def get_all_users():
+    try:
+        with open(users_file, 'r') as f:
+            return json.load(f)
+    except:
+        return []
+
+def is_admin(user_id):
+    return user_id == ADMIN_ID
+
+# === Handlers ===
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    save_user(user_id)
+    menu = [[KeyboardButton("📍 Share Location", request_location=True)]]
+    await update.message.reply_text(
+        "🌦 Welcome to Jay's Weather Bot!\n\n" +
+        "Send me a city name or share your location to get the forecast.\nType /menu to see more options.",
+        reply_markup=ReplyKeyboardMarkup(menu, resize_keyboard=True)
+    )
+
+async def handle_city(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    save_user(user_id)
+    city = update.message.text
+    await update.message.reply_text(get_weather(city))
+
+async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    loc = update.message.location
+    city = f"{loc.latitude},{loc.longitude}"
+    await update.message.reply_text(get_weather(city))
+
+async def scheduled_weather_update(context: ContextTypes.DEFAULT_TYPE):
+    for user_id in get_all_users():
+        try:
+            await context.bot.send_message(chat_id=user_id, text="☀️ Daily Forecast:\n" + get_weather("Lagos"))
+        except:
+            continue
+
+async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("📍 Weather by Location", callback_data='loc')],
+        [InlineKeyboardButton("🌡 Temperature Alerts", callback_data='alerts')],
+        [InlineKeyboardButton("📨 Send Message to Admin", callback_data='msg_admin')],
+        [InlineKeyboardButton("📈 Usage Analytics", callback_data='stats') if is_admin(update.effective_user.id) else None],
+        [InlineKeyboardButton("📢 Broadcast Message", callback_data='broadcast') if is_admin(update.effective_user.id) else None]
+    ]
+    keyboard = [row for row in keyboard if row[0] is not None]
+    await update.message.reply_text("🔘 Choose an option:", reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == 'loc':
+        await query.edit_message_text("📍 Please send your location.")
+
+    elif query.data == 'alerts':
+        await query.edit_message_text("🌡 You'll receive alerts for extreme weather soon!")
+
+    elif query.data == 'msg_admin':
+        context.user_data['awaiting_message'] = True
+        await query.edit_message_text("✍️ Type the message you want to send to the admin.")
+
+    elif query.data == 'stats' and is_admin(query.from_user.id):
+        count = len(get_all_users())
+        await query.edit_message_text(f"📊 Total users: {count}")
+
+    elif query.data == 'broadcast' and is_admin(query.from_user.id):
+        context.user_data['awaiting_broadcast'] = True
+        await query.edit_message_text("📢 Send your message now to broadcast to all users.")
+
+async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if context.user_data.get('awaiting_message'):
+        await context.bot.send_message(chat_id=ADMIN_ID, text=f"📨 Message from @{update.effective_user.username or update.effective_user.first_name} ({update.effective_user.id}):\n\n{update.message.text}")
+        context.user_data['awaiting_message'] = False
+        await update.message.reply_text("✅ Message sent to admin.")
+    elif context.user_data.get('awaiting_broadcast') and is_admin(update.effective_user.id):
+        for uid in get_all_users():
+            try:
+                await context.bot.send_message(chat_id=uid, text=f"📢 Broadcast:\n{update.message.text}")
+            except:
+                continue
+        context.user_data['awaiting_broadcast'] = False
+        await update.message.reply_text("✅ Broadcast sent.")
+    else:
+        await handle_city(update, context)
+
+# === Main ===
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu))
+    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_router))
+    app.add_handler(CallbackQueryHandler(button_handler))
+
+    app.job_queue.run_daily(scheduled_weather_update, time=time(hour=6, minute=30))
+
+    app.run_polling()
+
+if __name__ == '__main__':
+    main()
