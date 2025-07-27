@@ -574,6 +574,8 @@ async def run_fastapi():
     server = uvicorn.Server(config)
     await server.serve()
 
+import threading
+
 def main():
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
@@ -589,15 +591,15 @@ def main():
     # Schedule temperature alert checks every hour
     job_queue.run_repeating(check_temperature_alerts, interval=3600, first=10)
 
-    async def main_async():
-        # Run FastAPI server and Telegram bot polling concurrently
-        await asyncio.gather(
-            run_fastapi(),
-            application.run_polling()
-        )
+    def start_fastapi():
+        port = int(os.environ.get("PORT", 8000))
+        uvicorn.run(app, host="0.0.0.0", port=port)
+
+    fastapi_thread = threading.Thread(target=start_fastapi, daemon=True)
+    fastapi_thread.start()
 
     print("✅ Bot is running with FastAPI server...")
-    asyncio.run(main_async())
+    application.run_polling()
 
 if __name__ == "__main__":
     main()
