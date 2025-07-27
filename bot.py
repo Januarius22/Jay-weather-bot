@@ -3,6 +3,8 @@ from telegram import (
     KeyboardButton,
     ReplyKeyboardMarkup,
     ReplyKeyboardRemove,
+    InlineKeyboardButton, 
+    InlineKeyboardMarkup
 )
 from telegram.constants import ParseMode
 from telegram.ext import (
@@ -10,6 +12,7 @@ from telegram.ext import (
     CommandHandler,
     MessageHandler,
     ContextTypes,
+    CallbackContext,
     filters,
     JobQueue,
 )
@@ -23,7 +26,7 @@ import asyncio
 USERS_FILE = "users.json"
 
 # Set your credentials
-WEATHER_API_KEY = "ef68327cb4c2420881c02338252307"
+WEATHER_API_KEY = "57460d0a9c13405694614234252507"
 TELEGRAM_BOT_TOKEN = "7949067008:AAFgTnK0MjKngM00qcd08oaJCjjjOfXLbyU"
 ADMIN_CHAT_ID = 5075178708
 
@@ -34,53 +37,6 @@ admin_broadcast_mode = {
     "target_user": None  # could be user ID or None for broadcast-to-all
 }
 user_data = {}
-
-
-
-WEATHER_QUOTES = [
-    "After rain comes sunshine.",
-    "Wherever you go, no matter what the weather, always bring your own sunshine.",
-    "Sunshine is delicious, rain is refreshing, wind braces us up.",
-    "There’s no such thing as bad weather, only different kinds of good weather."
-]
-
-import os
-import json
-from pathlib import Path
-import re
-
-
-
-LOCATION_FILE = "user_locations.json"
-
-def save_user_location(user_id, latitude, longitude):
-    try:
-        if Path(LOCATION_FILE).exists():
-            with open(LOCATION_FILE, "r") as f:
-                data = json.load(f)
-        else:
-            data = {}
-
-        data[str(user_id)] = {
-            "latitude": latitude,
-            "longitude": longitude
-        }
-
-        with open(LOCATION_FILE, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Error saving location: {e}")
-
-def load_user_locations():
-    if not os.path.exists("locations.json"):
-        with open("locations.json", "w") as f:
-            json.dump({}, f)
-
-    with open("locations.json", "r") as f:
-        content = f.read().strip()
-        if not content:
-            return {}
-        return json.loads(content)
 
 
 def save_user(user_id, username):
@@ -110,7 +66,6 @@ def save_user(user_id, username):
 
 
 
-
 def get_user_count():
     if not Path(USERS_FILE).exists():
         return 0
@@ -124,50 +79,7 @@ def load_users():
     with open(USERS_FILE, "r") as f:
         return json.load(f)
 
-MESSAGES_FILE = "messages.json"
-
-def save_message(user_id, text):
-    if not Path(MESSAGES_FILE).exists():
-        with open(MESSAGES_FILE, "w") as f:
-            json.dump([], f)
-    with open(MESSAGES_FILE, "r") as f:
-        messages = json.load(f)
-    messages.append({"user_id": user_id, "text": text})
-    with open(MESSAGES_FILE, "w") as f:
-        json.dump(messages, f)
-
-def load_messages():
-    if not Path(MESSAGES_FILE).exists():
-        return []
-    with open(MESSAGES_FILE, "r") as f:
-        return json.load(f)
-
-def get_all_messages():
-    if not Path(MESSAGES_FILE).exists() or os.path.getsize(MESSAGES_FILE) == 0:
-        return []  # Return empty list if file doesn't exist or is empty
-
-    with open(MESSAGES_FILE, "r") as f:
-        try:
-            return json.load(f)
-        except json.JSONDecodeError:
-            return []  # In case file is not valid JSON
-
-def get_forecast(lat, lon):
-    url = f"http://api.weatherapi.com/v1/forecast.json?key={WEATHER_API_KEY}&q={lat},{lon}&days=3&aqi=no&alerts=no"
-    response = requests.get(url)
-    data = response.json()
-    if "error" in data:
-        return None
-    forecast_data = data["forecast"]["forecastday"]
-    lines = [f"📍 *{data['location']['name']}, {data['location']['country']}* - 3 Day Forecast:"]
-    for day in forecast_data:
-        date = day["date"]
-        condition = day["day"]["condition"]["text"].lower()
-        max_temp = day["day"]["maxtemp_c"]
-        min_temp = day["day"]["mintemp_c"]
-        rain = day["day"]["daily_chance_of_rain"]
-        lines.append(f"📅 {date}\n🌤️ {condition}\n🌡️ {min_temp}°C - {max_temp}°C\n🌧️ Chance of Rain: {rain}%\n")
-    return "\n".join(lines)
+#     return "\n".join(lines)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -177,15 +89,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(user_id, username)
 
     user_keyboard = [
-        [KeyboardButton("🌤️ Weather by City"), KeyboardButton("📍 Share Location", request_location=True)],
-        [KeyboardButton("📅 3-Day Forecast"), KeyboardButton("🌡️ Temperature Alerts")],
-        [KeyboardButton("📩 Contact Admin"), KeyboardButton("⏰ Daily Weather Update")],
-        [KeyboardButton("🌈 Fun Weather Quote")]
+        [KeyboardButton("🌤️ Weather by City"), KeyboardButton("📅 3-Day Forecast")],
+        [KeyboardButton("🌡️ Temperature Alerts"), KeyboardButton("⏰ Daily Weather Update")],
+        [KeyboardButton("📩 Contact Admin"), KeyboardButton("🌈 Fun Weather Quote")],
     ]
 
     admin_keyboard = [
-        [KeyboardButton("📊 Users Count"), KeyboardButton("📢 Broadcast")],
-        [KeyboardButton("💬 View Messages")]
+        [KeyboardButton("📊 Users Count"), KeyboardButton("📢 Broadcast")]
     ]
 
     # reply_markup = ReplyKeyboardMarkup(admin_keyboard if user_id == ADMIN_CHAT_ID else user_keyboard, resize_keyboard=True)
@@ -201,30 +111,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-def get_weather_by_city(city):
-    url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={city}&aqi=no"
-    try:
-        response = requests.get(url)
-        data = response.json()
-        if "error" in data:
-            return None
-        location = data["location"]["name"]
-        country = data["location"]["country"]
-        temp = data["current"]["temp_c"]
-        condition = data["current"]["condition"]["text"]
-        humidity = data["current"]["humidity"]
-        wind_kph = data["current"]["wind_kph"]
 
-        return (
-            f"📍 *{location}, {country}*\n"
-            f"🌡️ Temperature: {temp}°C\n"
-            f"🌥️ Condition: {condition}\n"
-            f"💧 Humidity: {humidity}%\n"
-            f"💨 Wind: {wind_kph} kph"
-        )
-
-    except:
-        return None
 
 async def broadcast(context: ContextTypes.DEFAULT_TYPE, message: str, targets=None):
     try:
@@ -243,23 +130,102 @@ async def broadcast(context: ContextTypes.DEFAULT_TYPE, message: str, targets=No
     except Exception as e:
         print(f"Broadcast error: {e}")
 
+import aiohttp
+
+# Helper functions for weather API calls
+
+import logging
+
+async def fetch_weather(city: str):
+    base_url = "http://api.weatherapi.com/v1/current.json"
+    params = {
+        "key": WEATHER_API_KEY,
+        "q": city,
+        "aqi": "no"
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(base_url, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    print("WEATHER RESPONSE:", data)
+                    logging.info(f"fetch_weather response for city '{city}': {data}")
+                    if "error" not in data:
+                        return data
+                    else:
+                        logging.warning(f"City '{city}' not found in weather API response: {data['error']}")
+                        return None
+                else:
+                    logging.error(f"Failed to fetch weather for city '{city}', HTTP status: {resp.status}")
+                    return None
+        except Exception as e:
+            logging.error(f"Exception during fetch_weather for city '{city}': {e}")
+            return None
+
+async def fetch_forecast(city: str):
+    base_url = "http://api.weatherapi.com/v1/forecast.json"
+    params = {
+        "key": WEATHER_API_KEY,
+        "q": city,
+        "days": 3,
+        "aqi": "no",
+        "alerts": "no"
+    }
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(base_url, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    print("WEATHER RESPONSE:", data)
+                    logging.info(f"fetch_forecast response for city '{city}': {data}")
+                    if "error" not in data:
+                        return data
+                    else:
+                        logging.warning(f"City '{city}' not found in forecast API response: {data['error']}")
+                        return None
+                else:
+                    logging.error(f"Failed to fetch forecast for city '{city}', HTTP status: {resp.status}")
+                    return None
+        except Exception as e:
+            logging.error(f"Exception during fetch_forecast for city '{city}': {e}")
+            return None
+
+# Fun weather quotes
+WEATHER_QUOTES = [
+    "Sunshine is the best medicine.",
+    "Wherever you go, no matter what the weather, always bring your own sunshine.",
+    "Some people feel the rain. Others just get wet.",
+    "A change in the weather is sufficient to recreate the world and ourselves.",
+    "There’s no such thing as bad weather, only inappropriate clothing.",
+    "Rain is grace; rain is the sky descending to the earth.",
+    "The best thing one can do when it’s raining is to let it rain.",
+]
+
+# User states for multi-step interactions
+# user_data[user_id] = {"state": None, "temp_alert": {"min": None, "max": None}, "daily_update_time": None, ...}
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    # user_name = update.effective_user.full_name
-    text = update.message.text.strip().lower()
+    text = update.message.text.strip()
+    text_lower = text.lower()
     user = update.effective_user
-    global ADMIN_CHAT_ID  
-    # user_id = user.id
     username = user.username if user.username else "N/A"
     save_user(user_id, username)
 
+    # Initialize user_data entry if not exists
+    if user_id not in user_data:
+        user_data[user_id] = {
+            "state": None,
+            "temp_alert": {"min": None, "max": None},
+            "daily_update_time": None,
+            "last_city": None,
+        }
 
     print(f"User sent: {text}")
-    # 🟩 Priority 1: Handle message after user selects "Contact Admin"
-    # ✅ Check if user is replying to "Contact Admin"
+
+    # Handle admin message mode
     if admin_message_mode.get(user_id):
-        admin_message_mode[user_id] = False  # reset
-        ADMIN_CHAT_ID = 5075178708  # Your Telegram ID
+        admin_message_mode[user_id] = False
         await context.bot.send_message(
             chat_id=ADMIN_CHAT_ID,
             text=f"📩 New message from user:\n\nUser ID: {user_id}\nUsername: @{username}\n\nMessage:\n{text}"
@@ -267,39 +233,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ Your message has been sent to the admin.")
         return
 
-    # 🔁 Your normal weather logic goes here
-    if "contact admin" in text.lower():
+    # Handle "Contact Admin" text
+    if "contact admin" in text_lower:
         admin_message_mode[user_id] = True
         await update.message.reply_text("✉️ Please type the message you want to send to the admin.")
         return
 
-
-    # 🟩 Priority 3: Admin-only commands
+    # Admin commands
     if user_id == ADMIN_CHAT_ID:
-        if text.lower() == "📊 users count":
-            total_users = get_user_count()  
+        if text_lower == "📊 users count":
+            total_users = get_user_count()
             await update.message.reply_text(f"👥 Total users: {total_users}")
             return
-
-        elif text.lower() == "📢 broadcast":
+        elif text_lower == "📢 broadcast":
             admin_broadcast_mode["active"] = True
-            admin_broadcast_mode["target_user"] = None  # default: send to all
+            admin_broadcast_mode["target_user"] = None
             await update.message.reply_text("📨 Type the message to broadcast to ALL users and this bd to userid_or_username : your message for specific user.")
             return
-
-
-        elif text.lower().startswith("bd to "):
+        elif text_lower.startswith("bd to "):
             try:
-                message_text = text[6:].strip()  # Removes "bd to "
+                message_text = text[6:].strip()
                 if ":" not in message_text:
                     await update.message.reply_text("❌ Invalid format. Use: bd to userid_or_username : your message")
                     return
-
                 target_raw, msg = map(str.strip, message_text.split(":", 1))
-
-                # Check if it's an ID (digits) or username (@something)
                 if target_raw.startswith("@"):
-                    # Search username in user_data
                     target_username = target_raw[1:].lower()
                     target_id = None
                     for uid, data in user_data.items():
@@ -311,26 +269,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         return
                 else:
                     target_id = int(target_raw)
-
                 await context.bot.send_message(chat_id=target_id, text=msg)
                 await update.message.reply_text(f"✅ Message sent to {target_raw}")
             except Exception as e:
                 print("Broadcast error:", e)
                 await update.message.reply_text("❌ Failed to send. Check your format or user ID.")
+            # Reset broadcast mode after targeted send
+            admin_broadcast_mode["active"] = False
+            admin_broadcast_mode["target_user"] = None
             return
-
-
         if admin_broadcast_mode["active"]:
             message_to_send = text
             if admin_broadcast_mode["target_user"]:
-                # Send to specific user
                 try:
                     await context.bot.send_message(chat_id=admin_broadcast_mode["target_user"], text=message_to_send)
                     await update.message.reply_text("✅ Message sent to selected user.")
                 except Exception as e:
                     await update.message.reply_text(f"❌ Failed to send: {e}")
             else:
-                # Broadcast to all users
                 users = load_users() or []
                 for uid in users:
                     try:
@@ -338,149 +294,192 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     except:
                         continue
                 await update.message.reply_text("✅ Broadcast sent to all users.")
-
-            # ✅ Reset mode after sending
             admin_broadcast_mode["active"] = False
             admin_broadcast_mode["target_user"] = None
             return
 
-        elif text.lower() == "💬 view messages":
-            messages = get_all_messages()
-            if messages:
-                reply = "\n\n".join([f"🧾 {m}" for m in messages])
-                await update.message.reply_text(reply)
-            else:
-                await update.message.reply_text("📭 No messages yet.")
-            return
+    # Handle user states for multi-step interactions
+    state = user_data[user_id].get("state")
 
-    # 🟩 Priority 4: Weather features
-    if text.lower() == "🌤️ weather by city":
-        await update.message.reply_text("🏖️ Enter city name:")
-        return
+    if state == "awaiting_city_weather":
+        city = text
+        weather = await fetch_weather(city)
+        if weather and "current" in weather and "condition" in weather["current"]:
+            location = weather["location"]["name"]
+            country = weather["location"]["country"]
+            desc = weather["current"]["condition"]["text"]
+            temp = weather["current"]["temp_c"]
+            humidity = weather["current"]["humidity"]
+            wind_speed = weather["current"]["wind_kph"]
 
-    elif text.lower() == "🌡️ temperature alerts":
-        all_locations = load_user_locations()
-        if str(user_id) in all_locations:
-            lat = all_locations[str(user_id)]["latitude"]
-            lon = all_locations[str(user_id)]["longitude"]
-            await send_alert(update, context, lat, lon)
+            msg = (
+                f"🌍 Weather in {location}, {country}:\n"
+                f"{desc}\n"
+                f"🌡️ Temperature: {temp}°C\n"
+                f"💧 Humidity: {humidity}%\n"
+                f"🌬️ Wind Speed: {wind_speed} km/h"
+            )
+
+            await update.message.reply_text(msg)
+            user_data[user_id]["last_city"] = city
         else:
-            await update.message.reply_text("📍 Please share your location first.")
+            await update.message.reply_text("❌ Could not find weather for that city. Please try again.")
+        user_data[user_id]["state"] = None
         return
 
-
-    elif text.lower() == "📅 3-day forecast":
-        all_locations = load_user_locations()
-        if str(user_id) in all_locations:
-            lat = all_locations[str(user_id)]["latitude"]
-            lon = all_locations[str(user_id)]["longitude"]
-            forecast = get_forecast(lat, lon)
-            await update.message.reply_text(forecast, parse_mode="Markdown")
+    if state == "awaiting_city_forecast":
+        city = text
+        forecast = await fetch_forecast(city)
+        if forecast and "forecast" in forecast and "forecastday" in forecast["forecast"]:
+            forecast_msg = f"📅 3-Day Forecast for {forecast['location']['name']}:\n"
+            for day in forecast["forecast"]["forecastday"]:
+                date = day["date"]
+                condition = day["day"]["condition"]["text"]
+                avg_temp = day["day"]["avgtemp_c"]
+                forecast_msg += f"{date}: {condition}, Avg Temp: {avg_temp}°C\n"
+            await update.message.reply_text(forecast_msg)
+            user_data[user_id]["last_city"] = city
         else:
-            await update.message.reply_text("📍 Please share your location first.")
+            await update.message.reply_text("❌ Could not find forecast for that city. Please try again.")
+        user_data[user_id]["state"] = None
         return
 
 
-    elif text.lower() == "⏰ daily weather update":
-        all_locations = load_user_locations()  # Load from file
-        if str(user_id) in all_locations:  # Keys are strings in JSON
-            context.chat_data["daily_update"] = True
-            await update.message.reply_text("✅ You'll receive daily updates!")
-        else:
-            await update.message.reply_text("📍 Please share your location first.")
+    if state == "awaiting_temp_alert":
+        # Expecting input like "min,max" e.g. "10,30"
+        try:
+            parts = text.split(",")
+            if len(parts) != 2:
+                raise ValueError
+            min_temp = float(parts[0].strip())
+            max_temp = float(parts[1].strip())
+            user_data[user_id]["temp_alert"]["min"] = min_temp
+            user_data[user_id]["temp_alert"]["max"] = max_temp
+            await update.message.reply_text(f"✅ Temperature alert set: Min {min_temp}°C, Max {max_temp}°C")
+        except:
+            await update.message.reply_text("❌ Invalid format. Please send min and max temperature separated by a comma, e.g. 10,30")
+        user_data[user_id]["state"] = None
         return
 
+    if state == "awaiting_daily_update_time":
+        # Expecting input like "HH:MM" 24-hour format
+        try:
+            parts = text.split(":")
+            if len(parts) != 2:
+                raise ValueError
+            hour = int(parts[0].strip())
+            minute = int(parts[1].strip())
+            if not (0 <= hour < 24 and 0 <= minute < 60):
+                raise ValueError
+            user_data[user_id]["daily_update_time"] = (hour, minute)
+            # Schedule job for this user
+            job_queue = context.job_queue
+            # Remove existing job for user if any
+            current_jobs = job_queue.get_jobs_by_name(str(user_id))
+            for job in current_jobs:
+                job.schedule_removal()
+            job_queue.run_daily(
+                daily_weather_update,
+                time=time(hour=hour, minute=minute),
+                name=str(user_id),
+                data={"user_id": user_id, "context": context}
+            )
+            await update.message.reply_text(f"✅ Daily weather update scheduled at {hour:02d}:{minute:02d}")
+        except:
+            await update.message.reply_text("❌ Invalid time format. Please send time as HH:MM in 24-hour format.")
+        user_data[user_id]["state"] = None
+        return
 
-    elif text.lower() == "🌈 fun weather quote":
+    # Handle button presses
+    if text == "🌤️ Weather by City":
+        user_data[user_id]["state"] = "awaiting_city_weather"
+        await update.message.reply_text("Please enter the city name to get current weather:")
+        return
+
+    if text == "📅 3-Day Forecast":
+        user_data[user_id]["state"] = "awaiting_city_forecast"
+        await update.message.reply_text("Please enter the city name to get 3-day forecast:")
+        return
+
+    if text == "🌡️ Temperature Alerts":
+        user_data[user_id]["state"] = "awaiting_temp_alert"
+        await update.message.reply_text("Please enter min and max temperature for alerts separated by a comma (e.g. 10,30):")
+        return
+
+    if text == "⏰ Daily Weather Update":
+        user_data[user_id]["state"] = "awaiting_daily_update_time"
+        await update.message.reply_text("Please enter the time for daily weather update in HH:MM (24-hour) format: TIME IS OF LONDON, UK")
+        return
+
+    if text == "🌈 Fun Weather Quote":
         quote = random.choice(WEATHER_QUOTES)
-        await update.message.reply_text(f"🌦️ *Fun Weather Quote:*\n\n_{quote}_", parse_mode="Markdown")
+        await update.message.reply_text(f"🌈 Fun Weather Quote:\n{quote}")
         return
 
-    # 🟩 Priority 5: Final fallback – Try to get weather by city
-    weather = get_weather_by_city(text)
-    if weather:
-        await update.message.reply_text(weather, parse_mode="Markdown")
-    else:
-        await update.message.reply_text("❌ City not found. Try again or use a button.")
+    # Final fallback: try to get weather by city if user sends a city name directly
+    weather = await fetch_weather(text)
+    if weather and "current" in weather and "condition" in weather["current"]:
+        desc = weather["current"]["condition"]["text"].capitalize()
+        temp = weather["current"]["temp_c"]
+        humidity = weather["current"]["humidity"]
+        wind_speed = weather["current"]["wind_kph"]
+        msg = (f"Weather in {text}:\n"
+               f"{desc}\n"
+               f"Temperature: {temp}°C\n"
+               f"Humidity: {humidity}%\n"
+               f"Wind Speed: {wind_speed} km/h")
+        await update.message.reply_text(msg)
+        user_data[user_id]["last_city"] = text
+        return
+
+    # If none matched, send help message
+    await update.message.reply_text("Sorry, I didn't understand that. Please use the buttons or type a city name.")
+
+# Job callback for daily weather update
+async def daily_weather_update(context: CallbackContext):
+    job = context.job
+    user_id = job.data["user_id"]
+    user_ctx = job.data["context"]
+    city = user_data.get(user_id, {}).get("last_city")
+    if not city:
+        await user_ctx.bot.send_message(chat_id=user_id, text="⏰ Daily update: Please set a city by using '🌤️ Weather by City' first.")
+        return
+    weather = await fetch_weather(city)
+    if weather and "current" in weather and "condition" in weather["current"]:
+        desc = weather["weather"][0]["description"].capitalize()
+        temp = weather["main"]["temp"]
+        humidity = weather["main"]["humidity"]
+        wind_speed = weather["wind"]["speed"]
+        msg = (f"⏰ Daily Weather Update for {city}:\n"
+               f"{desc}\n"
+               f"Temperature: {temp}°C\n"
+               f"Humidity: {humidity}%\n"
+               f"Wind Speed: {wind_speed} m/s")
+        await user_ctx.bot.send_message(chat_id=user_id, text=msg)
+
+# Function to check temperature alerts (can be scheduled periodically)
+async def check_temperature_alerts(context: CallbackContext):
+    users = list(user_data.keys())
+    for user_id in users:
+        alert = user_data[user_id].get("temp_alert")
+        city = user_data[user_id].get("last_city")
+        if alert and city and (alert["min"] is not None or alert["max"] is not None):
+            weather = await fetch_weather(city)
+            if weather and weather.get("main"):
+                temp = weather["main"]["temp"]
+                if (alert["min"] is not None and temp < alert["min"]) or (alert["max"] is not None and temp > alert["max"]):
+                    try:
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=f"🌡️ Temperature Alert for {city}!\nCurrent temperature: {temp}°C\nAlert range: {alert['min']}°C - {alert['max']}°C"
+                        )
+                    except:
+                        pass
+
 
 
 # Remaining functions unchanged...
 # Please paste the rest of your unchanged helper functions and main() here if needed.
-
-
-def get_weather_by_coords(lat, lon):
-    url = f"http://api.weatherapi.com/v1/current.json?key={WEATHER_API_KEY}&q={lat},{lon}&aqi=no"
-    response = requests.get(url)
-    data = response.json()
-    if "error" in data:
-        return None
-    return data
-
-def format_weather(data):
-    location = data["location"]["name"]
-    country = data["location"]["country"]
-    temp = data["current"]["temp_c"]
-    condition = data["current"]["condition"]["text"]
-    humidity = data["current"]["humidity"]
-    wind_kph = data["current"]["wind_kph"]
-
-    return (
-        f"🌍 *{location}, {country}*\n"
-        f"🌡️ Temperature: {temp}°C\n"
-        f"🌤️ Condition: {condition}\n"
-        f"💧 Humidity: {humidity}%\n"
-        f"🌬️ Wind: {wind_kph} kph"
-    )
-
-
-
-
-async def handle_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        user = update.message.from_user
-        user_id = user.id
-        username = user.username  # Can be None
-
-        # Save user ID and username
-        save_user(user_id, username)
-
-        location = update.message.location
-        save_user_location(user_id, location.latitude, location.longitude)
-
-        await update.message.reply_text("✅ Location saved! You can now access local weather features.")
-
-    except Exception as e:
-        print(f"Error in handle_location: {e}")
-        await update.message.reply_text("❌ An error occurred while processing your location. Please try again.")
-
-
-async def send_alert(update, context, lat, lon):
-    url = f"http://api.weatherapi.com/v1/forecast.json?key={WEATHER_API_KEY}&q={lat},{lon}&days=1&aqi=no&alerts=no"
-    response = requests.get(url)
-    data = response.json()
-    if "error" in data:
-        await update.message.reply_text("❌ Could not fetch forecast.")
-        return
-
-    day = data["forecast"]["forecastday"][0]["day"]
-    max_temp = day["maxtemp_c"]
-    rain_chance = day["daily_chance_of_rain"]
-
-    if max_temp > 35:
-        await update.message.reply_text(f"🌡️ Heat Alert: Max temp today is {max_temp}°C. Stay hydrated!")
-    elif int(rain_chance) > 60:
-        await update.message.reply_text(f"🌧️ Rain Alert: {rain_chance}% chance of rain. Carry an umbrella!")
-
-async def scheduled_weather_update(context: ContextTypes.DEFAULT_TYPE):
-    for user_id, (lat, lon) in user_locations.items():
-        chat_data = context.chat_data.get(user_id)
-        if chat_data and chat_data.get("daily_update"):
-            forecast = get_forecast(lat, lon)
-            if forecast:
-                try:
-                    await context.bot.send_message(chat_id=user_id, text=forecast, parse_mode="Markdown")
-                except:
-                    continue
 
 async def admin_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID:
@@ -530,14 +529,14 @@ def main():
     app.add_handler(CommandHandler("broadcast", admin_broadcast))
     app.add_handler(CommandHandler("stats", admin_stats))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.LOCATION, handle_location))
-
-
-
+    # app.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
     # ✅ JobQueue (Add this after all handlers are added)
     job_queue = app.job_queue
-    job_queue.run_daily(scheduled_weather_update, time=time(hour=6, minute=30))
+    # Schedule temperature alert checks every hour
+    job_queue.run_repeating(check_temperature_alerts, interval=3600, first=10)
+
+    # job_queue.run_daily(scheduled_weather_update, time=time(hour=6, minute=30))
 
     print("✅ Bot is running...")
     app.run_polling()
