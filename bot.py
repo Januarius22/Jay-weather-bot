@@ -522,12 +522,46 @@ async def admin_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"\U0001F4CA Total users: {total}")
 
+async def admin_allusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        await update.message.reply_text("⛔ You are not authorized to use this command.")
+        return
+
+    if not Path(USERS_FILE).exists():
+        await update.message.reply_text("❌ No users found.")
+        return
+
+    with open(USERS_FILE, "r") as f:
+        users = json.load(f)
+
+    if not users:
+        await update.message.reply_text("❌ No users found.")
+        return
+
+    message_lines = ["\U0001F465 Users List:"]
+    for user in users:
+        uid = user.get("id", "N/A")
+        username = user.get("username", "N/A")
+        message_lines.append(f"ID: {uid}, Username: {username}")
+
+    message = "\n".join(message_lines)
+    # Telegram messages have a max length, so split if needed
+    MAX_MESSAGE_LENGTH = 4000
+    if len(message) > MAX_MESSAGE_LENGTH:
+        # Split message into chunks
+        chunks = [message[i:i+MAX_MESSAGE_LENGTH] for i in range(0, len(message), MAX_MESSAGE_LENGTH)]
+        for chunk in chunks:
+            await update.message.reply_text(chunk)
+    else:
+        await update.message.reply_text(message)
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("broadcast", admin_broadcast))
     app.add_handler(CommandHandler("stats", admin_stats))
+    app.add_handler(CommandHandler("allusers", admin_allusers))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     # app.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
