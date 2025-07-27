@@ -95,7 +95,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     admin_keyboard = [
-        [KeyboardButton("📊 Users Count"), KeyboardButton("📢 Broadcast")]
+        [KeyboardButton("📊 Users Count"), KeyboardButton("📢 Broadcast"), KeyboardButton("👥 All Users")]
     ]
 
     # reply_markup = ReplyKeyboardMarkup(admin_keyboard if user_id == ADMIN_CHAT_ID else user_keyboard, resize_keyboard=True)
@@ -249,6 +249,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             admin_broadcast_mode["active"] = True
             admin_broadcast_mode["target_user"] = None
             await update.message.reply_text("📨 Type the message to broadcast to ALL users and this bd to userid_or_username : your message for specific user.")
+            return
+        elif text_lower == "👥 all users":
+            await admin_allusers(update, context)
             return
         elif text_lower.startswith("bd to "):
             try:
