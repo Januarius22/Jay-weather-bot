@@ -22,6 +22,16 @@ from pathlib import Path
 from datetime import time
 import random
 import asyncio
+import os
+from fastapi import FastAPI
+import uvicorn
+
+app = FastAPI()
+
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
 
 USERS_FILE = "users.json"
 
@@ -558,25 +568,36 @@ async def admin_allusers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text(message)
 
-def main():
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+async def run_fastapi():
+    port = int(os.environ.get("PORT", 8000))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("broadcast", admin_broadcast))
-    app.add_handler(CommandHandler("stats", admin_stats))
-    app.add_handler(CommandHandler("allusers", admin_allusers))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    # app.add_handler(MessageHandler(filters.LOCATION, handle_location))
+def main():
+    application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("broadcast", admin_broadcast))
+    application.add_handler(CommandHandler("stats", admin_stats))
+    application.add_handler(CommandHandler("allusers", admin_allusers))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # application.add_handler(MessageHandler(filters.LOCATION, handle_location))
 
     # ✅ JobQueue (Add this after all handlers are added)
-    job_queue = app.job_queue
+    job_queue = application.job_queue
     # Schedule temperature alert checks every hour
     job_queue.run_repeating(check_temperature_alerts, interval=3600, first=10)
 
-    # job_queue.run_daily(scheduled_weather_update, time=time(hour=6, minute=30))
+    async def main_async():
+        # Run FastAPI server and Telegram bot polling concurrently
+        await asyncio.gather(
+            run_fastapi(),
+            application.run_polling()
+        )
 
-    print("✅ Bot is running...")
-    app.run_polling()
+    print("✅ Bot is running with FastAPI server...")
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
